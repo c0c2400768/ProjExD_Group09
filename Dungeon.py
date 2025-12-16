@@ -7,6 +7,7 @@ WIDTH = 1100
 HEIGHT = 650
 FPS = 60
 
+
 # デバッグ：地面ラインを表示するなら True
 DEBUG_DRAW_GROUND_LINE = True
 
@@ -17,7 +18,14 @@ STAGE2_TMR = 1500  # 60FPS想定
 
 # グローバル（現在ステージの接地Y）
 GROUND_Y = HEIGHT - 60
-
+# =====================
+# ゲーム状態
+# =====================
+STATE_START = 0
+STATE_PLAY = 1
+STATE_TO_FINAL = 2
+STATE_CLEAR = 3
+STATE_GAMEOVER = 4
 
 # =========================
 # クラス外関数（メモ準拠）
@@ -34,6 +42,55 @@ def load_image(filename: str) -> pg.Surface:
         except Exception as e:
             last_err = e
     raise SystemExit(f"画像 '{filename}' の読み込みに失敗しました: {last_err}")
+# =====================
+# 画面描画
+# =====================
+def load_font(size):
+    return pg.font.SysFont("meiryo", size)
+def draw_start_screen(screen):
+    screen.fill((0, 0, 0))
+
+    font = load_font(80)
+    title = font.render("こうかとんダンジョン", True, (255,255,255))
+    title_rect = title.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 80))
+    screen.blit(title, title_rect)
+
+    font2 = load_font(40)
+    start = font2.render("ENTERでスタート", True, (200,200,200))
+    start_rect = start.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 40))
+    screen.blit(start, start_rect)
+
+
+def draw_to_final_screen(screen):
+    screen.fill((0, 0, 0))
+    font = load_font(80)
+    text = font.render("最終ステージへ", True, (255,255,0))
+    rect = text.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+    screen.blit(text, rect)
+
+
+def draw_clear_screen(screen):
+    screen.fill((0, 0, 0))
+    font = load_font(80)
+    text = font.render("CLEAR!", True, (0,255,0))
+    rect = text.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+    screen.blit(text, rect)
+
+
+def draw_gameover_screen(screen):
+    screen.fill((0, 0, 0))
+    font = load_font(80)
+    text = font.render("GAME OVER", True, (255,0,0))
+    rect = text.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+    screen.blit(text, rect)
+
+
+#仮設定
+def draw_hp(screen, hp):
+    font =load_font(36)
+    screen.blit(font.render(f"HP: {hp}", True, (255,255,255)), (20, 20))
+
+
 
 
 def check_bound(obj_rct: pg.Rect) -> tuple[bool, bool]:
@@ -295,10 +352,12 @@ class Enemy(pg.sprite.Sprite):
 # メイン
 # =========================
 def main():
-    pg.display.set_caption("こうかとん横スクロール（ベース）")
+    pg.display.set_caption("こうかとんダンジョン")
     screen = pg.display.set_mode((WIDTH, HEIGHT))
     clock = pg.time.Clock()
-
+    
+    game_state = STATE_START
+    state_timer = 0
     stage = 1
     params = stage_params(stage)
 
@@ -307,6 +366,9 @@ def main():
     enemies = pg.sprite.Group()
 
     tmr = 0
+    player_hp = 5   # （担当と連携）
+    midboss_defeated = False# 中ボス撃破フラグ（稲葉担当からもらう）
+    lastboss_defeated = False# ラスボス撃破フラグ（赤路担当からもらう）
 
     while True:
         key_lst = pg.key.get_pressed()
@@ -314,38 +376,79 @@ def main():
         for event in pg.event.get():
             if event.type == pg.QUIT:
                 return 0
+
             if event.type == pg.KEYDOWN:
+            # 共通操作
                 if event.key == pg.K_ESCAPE:
                     return 0
-                if event.key == pg.K_UP:
-                    bird.try_jump()
 
-        # ステージ切替（全2ステージ）
-        if stage == 1 and should_switch_stage(tmr):
-            stage = 2
-            params = stage_params(stage)
-            bg = Background(params["bg_file"], params["bg_speed"])
-            # bird を新しい地面Yへ合わせる（めり込み/浮きを防ぐ）
+            # ===== スタート画面 =====
+                if game_state == STATE_START:
+                    if event.key == pg.K_RETURN:
+                        game_state = STATE_PLAY
+                        tmr = 0  # タイマーリセット
+
+            # ===== プレイ中 =====
+                elif game_state == STATE_PLAY:
+                    if event.key == pg.K_UP:
+                        bird.try_jump()
+
+
+        # ========= 状態別処理 =========
+        if game_state == STATE_START:
+            draw_start_screen(screen)
+        
+        elif game_state == STATE_PLAY:
+            if stage == 1 and should_switch_stage(tmr):
+                game_state = STATE_TO_FINAL
+                state_timer = 0
+
+                # bird を新しい地面Yへ合わせる（めり込み/浮きを防ぐ）
             bird.get_rect().bottom = get_ground_y()
+            if player_hp <= 0:
+                game_state = STATE_GAMEOVER
+            #他担当と連携
+            if lastboss_defeated:
+                game_state = STATE_CLEAR
 
-        # 敵生成：複数流入
-        if tmr % params["spawn_interval"] == 0:
-            spawn_enemy(enemies, stage)
-            if random.random() < 0.30:
-                spawn_enemy(enemies, stage)
+            
+
+        
 
         # 描画
-        bg.update(screen)
+            bg.update(screen)
 
-        if DEBUG_DRAW_GROUND_LINE:
-            pg.draw.line(screen, (0, 0, 0), (0, get_ground_y()), (WIDTH, get_ground_y()), 2)
+            if DEBUG_DRAW_GROUND_LINE:
+                pg.draw.line(screen, (0, 0, 0), (0, get_ground_y()), (WIDTH, get_ground_y()), 2)
 
-        bird.update(key_lst, screen)
-        enemies.update()
-        enemies.draw(screen)
+            bird.update(key_lst, screen)
+            enemies.update()
+            enemies.draw(screen)
+            # 敵生成：複数流入
+            if tmr % params["spawn_interval"] == 0:
+                spawn_enemy(enemies, stage)
+                if random.random() < 0.30:
+                    spawn_enemy(enemies, stage)
+            tmr += 1
+
+        elif game_state == STATE_TO_FINAL:
+            state_timer += 1
+            draw_to_final_screen(screen)
+            if state_timer > 120:
+                stage = 2
+                params = stage_params(stage)
+                bg = Background(params["bg_file"], params["bg_speed"])
+                bird.get_rect().bottom = get_ground_y()
+                game_state = STATE_PLAY
+                tmr = 0
+                
+        elif game_state == STATE_CLEAR:
+            draw_clear_screen(screen)
+        
+        elif game_state == STATE_GAMEOVER:
+            draw_gameover_screen(screen)
 
         pg.display.update()
-        tmr += 1
         clock.tick(FPS)
 
 
