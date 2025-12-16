@@ -30,6 +30,8 @@ STATE_GAMEOVER = 4
 # =========================
 # クラス外関数（メモ準拠）
 # =========================
+def load_font(size):
+    return pg.font.SysFont("meiryo", size)
 def load_image(filename: str) -> pg.Surface:
     """
     画像読み込み（fig/filename -> filename の順に探す）
@@ -45,8 +47,7 @@ def load_image(filename: str) -> pg.Surface:
 # =====================
 # 画面描画
 # =====================
-def load_font(size):
-    return pg.font.SysFont("meiryo", size)
+
 def draw_start_screen(screen):
     screen.fill((0, 0, 0))
 
@@ -72,7 +73,7 @@ def draw_to_final_screen(screen):
 def draw_clear_screen(screen):
     screen.fill((0, 0, 0))
     font = load_font(80)
-    text = font.render("CLEAR!", True, (0,255,0))
+    text = font.render("クリア", True, (0,255,0))
     rect = text.get_rect(center=(WIDTH // 2, HEIGHT // 2))
     screen.blit(text, rect)
 
