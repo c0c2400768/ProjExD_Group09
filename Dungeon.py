@@ -594,7 +594,10 @@ class Boss(pg.sprite.Sprite):
 
         self.hp = FINAL_BOSS_HP
 
-    def update(self):
+        self._shot_tmr = 0
+        self._shot_interval = 90  # 1.5秒ごと
+
+    def update(self, bird_rect: pg.Rect, boss_meteors: pg.sprite.Group):
         self._action_tmr += 1
         if self._action_tmr >= self._next_action:
             self._action_tmr = 0
@@ -619,11 +622,42 @@ class Boss(pg.sprite.Sprite):
 
         self.image = self.hit_image if self.hit_timer > 0 else self.base_image
 
+        self._shot_tmr += 1
+        if self._shot_tmr % self._shot_interval == 0:
+            # こうかとんがボスの左にいるなら左へ、右なら右へ
+            d = -1 if bird_rect.centerx < self.rect.centerx else +1
+
+            # 発射位置（ボスの左右端から少し外）
+            if d == -1:
+                start = (self.rect.left - 20, self.rect.centery)
+            else:
+                start = (self.rect.right + 20, self.rect.centery)
+
+            boss_meteors.add(SideMeteor(start, d))
+
     def on_hit(self):
         self.hit_timer = 10
 
     def draw(self, screen):
         screen.blit(self.image, self.rect)
+
+class SideMeteor(pg.sprite.Sprite):
+    """最終ボスが横向きに放つ隕石（Meteor.png流用）"""
+    def __init__(self, start_xy: tuple[int, int], direction: int):
+        super().__init__()
+        size = random.randint(50, 150)
+        raw_image = load_image("Meteor.png")
+        self.image = pg.transform.smoothscale(raw_image, (size, size))
+        self.rect = self.image.get_rect(center=start_xy)
+
+        self._dir = +1 if direction >= 0 else -1
+        self._vx = 14 * self._dir  # 速さ（好みで調整）
+
+    def update(self):
+        self.rect.x += self._vx
+        if self.rect.right < 0 or self.rect.left > WIDTH:
+            self.kill()  # kill() は所属している全Groupから外れる :contentReference[oaicite:1]{index=1}
+            
 
 # =========================
 # ここまで
@@ -982,6 +1016,7 @@ def main():
     exps = pg.sprite.Group()
 
     midboss_group = pg.sprite.Group()
+    boss_meteors = pg.sprite.Group()
     finalboss_group = pg.sprite.Group()
     beams_tbos = pg.sprite.Group()
     meteors = pg.sprite.Group()
@@ -1070,6 +1105,7 @@ def main():
                         midboss_group.empty()
                         beams_tbos.empty()
                         meteors.empty()
+                        boss_meteors.empty()
                         mid_boss_spawned = False
                         mid_boss_defeated = False
 
@@ -1113,6 +1149,7 @@ def main():
             beams.update()
             arrows.update()
             exps.update()
+            boss_meteors.update()
 
             # --- 敵スポーン（中ボス前だけ）---
             if (not mid_boss_spawned) and (not final_boss_spawned):
@@ -1190,6 +1227,9 @@ def main():
             if pg.sprite.spritecollide(bird, meteors, True):
                 bird.take_damage(DMG)
                 bird.set_damage()
+            if pg.sprite.spritecollide(bird, boss_meteors, True):
+                bird.take_damage(DMG)
+                bird.set_damage()
 
             if mid_boss_spawned and len(midboss_group.sprites()) > 0:
                 boss = midboss_group.sprites()[0]
@@ -1262,7 +1302,7 @@ def main():
                         bird.rect = clamp_in_screen(bird.rect)
 
             if final_boss_spawned and len(finalboss_group.sprites()) > 0:
-                finalboss_group.update()
+                finalboss_group.update(bird.get_rect(), boss_meteors)
 
                 boss = finalboss_group.sprites()[0]
 
@@ -1289,6 +1329,7 @@ def main():
             beams.draw(screen)
             arrows.draw(screen)
             exps.draw(screen)
+            boss_meteors.draw(screen)
 
             # --- UI：左下HP ---(担当：佐藤)
             bar_x, bar_y = 20, HEIGHT - 25
