@@ -972,7 +972,7 @@ def main():
     bird.hp = HP_MAX  # HPをbird.hpに統一
 
     # ---- スコア ----
-    score = 400
+    score = 0
 
     # ---- グループ ----
     enemies = pg.sprite.Group()
