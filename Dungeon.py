@@ -8,6 +8,8 @@ os.chdir(os.path.dirname(os.path.abspath(__file__)))
 WIDTH = 1100
 HEIGHT = 650
 FPS = 60
+BEAM_IMG_OFFSET_DEG = 0
+ARROW_IMG_OFFSET_DEG = -45
 
 DEBUG_DRAW_GROUND_LINE = True
 
@@ -491,6 +493,10 @@ class Bird(pg.sprite.Sprite):
     def get_speed(self) -> int:
         return self._speed
     
+    def get_dir(self) -> int:
+        """+1: 右向き, -1: 左向き"""
+        return self._dir
+    
     #高柳追加
     def take_damage(self, dmg: int) -> None:
         """無敵中でなければダメージを受ける"""
@@ -649,68 +655,76 @@ class Beam(pg.sprite.Sprite):
     - 発射位置から右方向へ直進
     - 画面外に出たら消滅
     """
-    RANGE_PX = 200  # ビーム到達距離（発射位置からの相対）
-    def __init__(self, start_xy: tuple[int, int]):
+    RANGE_PX = 200
+
+    def __init__(self, start_xy: tuple[int, int], direction: int = +1):
         super().__init__()
-        self.image = load_image("beam_k.png")
+        base = load_image("beam_k.png")
+
+        self._dir = +1 if direction >= 0 else -1
+        angle = (0 if self._dir == +1 else 180) + BEAM_IMG_OFFSET_DEG
+
+        # 画像も向きに合わせる（回転の仕様：反時計回り、負で時計回り）:contentReference[oaicite:3]{index=3}
+        self.image = pg.transform.rotozoom(base, angle, 1.0)
         self.rect = self.image.get_rect(center=start_xy)
-        self._vx = 16
-        self._end_x = self.rect.centerx + self.RANGE_PX
+
+        self._vx = 16 * self._dir
+        self._end_x = self.rect.centerx + self.RANGE_PX * self._dir
 
     def update(self) -> None:
         self.rect.x += self._vx
-        if self.rect.left >= self._end_x:
+
+        # 到達距離で消す（右なら left>=end、左なら right<=end）
+        if self._dir == +1:
+            if self.rect.left >= self._end_x:
+                self.kill()
+        else:
+            if self.rect.right <= self._end_x:
+                self.kill()
+
+        # 念のため画面外でも消す
+        if self.rect.right < 0 or self.rect.left > WIDTH:
             self.kill()
 
 class Arrow(pg.sprite.Sprite):
     """
     矢：放物線を描きつつ右へ進む
     """
-    def __init__(self, start_xy: tuple[int, int]):
+    def __init__(self, start_xy: tuple[int, int], direction: int = +1):
         super().__init__()
-        self._base_image = load_image("arrow.png")  # 元画像を保持（回転はここから作る）
-        self.image = self._base_image
-        self.image = pg.transform.rotozoom(self._base_image, 0, 0.2)
+        self._base_image = load_image("arrow.png")
+        self._dir = +1 if direction >= 0 else -1
+
+        self._scale = 0.2
+        self.image = pg.transform.rotozoom(self._base_image, ARROW_IMG_OFFSET_DEG, self._scale)
         self.rect = self.image.get_rect(center=start_xy)
 
-        self._vx = 16
+        self._vx = 16 * self._dir
         self._vy = -10.5
         self._g = 0.6
-
-        self._angle = 0.0  # 現在角度（無駄な回転を減らす用）
-
+        self._angle = None
+        
     def update(self) -> None:
-        """
-        矢を更新する。
-        - 右方向へ進みつつ重力で落下する
-        - 上昇中(_vy<0)は右向き固定
-        - 落下開始後(_vy>=0)は進行方向に合わせて右下向きに回転
-        - 地面に触れた瞬間に消滅
-        """
-        # 位置更新
         self.rect.x += self._vx
         self._vy += self._g
         self.rect.y += int(self._vy)
 
-        # --- 向き更新 ---
-        # 発射直後（上昇中）は右向き固定、落ち始めたら進行方向に向ける
-        if self._vy < 0:
-            new_angle = 0.0
-        else:
-            # pygame座標はyが下に増えるので、角度は -atan2(vy, vx)
-            new_angle = -math.degrees(math.atan2(self._vy, self._vx)) - 45
+        # 速度ベクトル(vx, vy)の向きに合わせる
+        # angleは「反時計回りの度数」（負で時計回り） :contentReference[oaicite:2]{index=2}
+        # yは下に増えるので -atan2(vy, vx) が自然 :contentReference[oaicite:3]{index=3}
+        new_angle = -math.degrees(math.atan2(self._vy, self._vx)) + ARROW_IMG_OFFSET_DEG
 
-        # 角度が少し変わったときだけ回転（軽量化）
-        if abs(new_angle - self._angle) > 1.0:
+        if self._angle is None or abs(new_angle - self._angle) > 1.0:
             self._angle = new_angle
             center = self.rect.center
-            self.image = pg.transform.rotozoom(self._base_image, self._angle, 0.2)
+            self.image = pg.transform.rotozoom(self._base_image, self._angle, self._scale)
             self.rect = self.image.get_rect(center=center)
 
-        # 地面に触れた瞬間消滅
-        if self.rect.bottom >= get_ground_y():
-            self.kill()
-        if self.rect.left > WIDTH:
+        ground = get_ground_y()
+        GROUND_HIT_MARGIN = 12  # 8〜20くらいで調整
+
+        # ★上昇中は地面判定しない（地面に立って撃った瞬間の即死を防ぐ）
+        if self._vy >= 0 and self.rect.bottom >= ground - GROUND_HIT_MARGIN:
             self.kill()
 
 # =========================
@@ -958,7 +972,7 @@ def main():
     bird.hp = HP_MAX  # HPをbird.hpに統一
 
     # ---- スコア ----
-    score = 0
+    score = 400
 
     # ---- グループ ----
     enemies = pg.sprite.Group()
@@ -1066,10 +1080,18 @@ def main():
                         return
                     if event.key == pg.K_SPACE:
                         atk_id = inv.get_attack()
+                        d = bird.get_dir()  # +1 or -1
+
+                        # 発射位置：右向きなら右手、左向きなら左手
+                        if d == +1:
+                            start = (bird.get_rect().right + 30, bird.get_rect().centery)
+                        else:
+                            start = (bird.get_rect().left - 30, bird.get_rect().centery)
+
                         if atk_id == "Beam":
-                            beams.add(Beam((bird.get_rect().right + 30, bird.get_rect().centery)))
+                            beams.add(Beam(start, direction=d))
                         elif atk_id == "arrow":
-                            arrows.add(Arrow((bird.get_rect().right + 30, bird.get_rect().centery)))
+                            arrows.add(Arrow(start, direction=d))
 
         # ---------- 描画クリア ----------
         screen.fill((0, 0, 0))
@@ -1168,6 +1190,14 @@ def main():
             if pg.sprite.spritecollide(bird, meteors, True):
                 bird.take_damage(DMG)
                 bird.set_damage()
+
+            if mid_boss_spawned and len(midboss_group.sprites()) > 0:
+                boss = midboss_group.sprites()[0]
+                if bird.get_rect().colliderect(boss.rect):
+                    before = bird.hp
+                    bird.take_damage(DMG)   # DMG=20.0 なので20ダメージ
+                    if bird.hp < before:
+                        bird.set_damage()
 
             # --- 中ボスに攻撃命中 ---
             if mid_boss_spawned and len(midboss_group.sprites()) > 0:
